@@ -149,6 +149,13 @@ function registerDevice(element) {
 // --- Callback Logic ---
 function callback(err, msg) {
     if (err || !msg) return;
+    
+    // WICHTIG: Wir loggen hier einmal kurz, was reinkommt, um zu sehen ob Funk-Antworten da sind
+    if (msg.topic === 'wms-vb-blind-position-update' || msg.topic === 'wms-vb-weather-update') {
+        log.info(`Antwort erhalten: ${msg.topic} für SNR: ${msg.payload.snr}`);
+    }
+
+    // Wir stellen sicher, dass die SNR immer als sauberer String verglichen wird
     const snr = msg.payload && msg.payload.snr ? msg.payload.snr.toString().toUpperCase() : null;
     
     switch (msg.topic) {
@@ -160,13 +167,17 @@ function callback(err, msg) {
             break;
         case 'wms-vb-blind-position-update':
             if (snr && client.connected) {
+                // Wir prüfen, ob wir das Gerät kennen (Groß/Kleinschreibung beachten)
                 if (msg.payload.position !== undefined) {
-                    client.publish(`warema/${snr}/position`, msg.payload.position.toString(), {retain: true});
-                    if (devices[snr]) devices[snr].position = msg.payload.position;
+                    const pos = Math.round(msg.payload.position);
+                    client.publish(`warema/${snr}/position`, pos.toString(), {retain: true});
+                    client.publish(`warema/${snr}/state`, pos > 0 ? 'closed' : 'open', {retain: true});
+                    if (devices[snr]) devices[snr].position = pos;
                 }
                 if (msg.payload.angle !== undefined) {
-                    client.publish(`warema/${snr}/tilt`, msg.payload.angle.toString(), {retain: true});
-                    if (devices[snr]) devices[snr].tilt = msg.payload.angle;
+                    const tilt = Math.round(msg.payload.angle);
+                    client.publish(`warema/${snr}/tilt`, tilt.toString(), {retain: true});
+                    if (devices[snr]) devices[snr].tilt = tilt;
                 }
             }
             break;
