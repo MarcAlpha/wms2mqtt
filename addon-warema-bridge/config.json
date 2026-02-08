@@ -6,8 +6,12 @@
   "arch": ["armv7", "aarch64", "amd64"],
   "startup": "services",
   "boot": "auto",
+  "services": ["mqtt"],
+  "mqtt": true,
+  "hassio_api": true,
   "privileged": ["SYS_RAWIO"],
   "full_access": true,
+  "devices": ["/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K3ATN-if00-port0"],
   "options": {
     "wms_channel": 17,
     "wms_key": "00112233445566778899AABBCCDDEEFF",
