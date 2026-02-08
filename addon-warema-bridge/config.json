@@ -9,7 +9,6 @@
   "url": "https://github.com/MarcAlpha/wms2mqtt",
   "boot": "auto",
   "hassio_api": true,
-  "image": "MarcAlpha/wms2mqtt",
   "options": {
     "wms_serial_port": null
   },
