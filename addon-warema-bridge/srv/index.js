@@ -57,10 +57,21 @@ function publishSensorConfig(snr, type, name, unit, deviceClass, icon, baseDevic
     client.publish(topic, JSON.stringify(payload), { retain: true });
 }
 
+// --- Hilfsfunktion für SNR Wandlung (Dez -> Hex) ---
+function parseSnr(snr) {
+    if (!snr) return null;
+    const n = parseInt(snr);
+    // Wenn die Zahl > 1 Mio ist, ist es die Dezimal-Repräsentation, die wir in Hex brauchen
+    if (!isNaN(n) && n > 0xFFFFF) {
+        return n.toString(16).toUpperCase();
+    }
+    return snr.toString().toUpperCase();
+}
+
 // --- Geräte-Registrierung ---
 function registerDevice(element) {
-    const snr = element.snr.toString().toUpperCase();
-    if (devices[snr]) return;
+    const snr = parseSnr(element.snr);
+    if (!snr || devices[snr]) return;
 
     const baseDevice = {
         identifiers: [snr],
@@ -150,14 +161,13 @@ function registerDevice(element) {
 function callback(err, msg) {
     if (err || !msg) return;
     
-    // WICHTIG: Wir loggen hier einmal kurz, was reinkommt, um zu sehen ob Funk-Antworten da sind
-    if (msg.topic === 'wms-vb-blind-position-update' || msg.topic === 'wms-vb-weather-update') {
-        log.info(`Antwort erhalten: ${msg.topic} für SNR: ${msg.payload.snr}`);
+    // Wir stellen sicher, dass die SNR immer als sauberer HEX-String verglichen wird
+    const snr = msg.payload && msg.payload.snr ? parseSnr(msg.payload.snr) : null;
+    
+    if (snr && (msg.topic === 'wms-vb-blind-position-update' || msg.topic === 'wms-vb-weather-update')) {
+        log.info(`Antwort erhalten: ${msg.topic} für SNR: ${snr}`);
     }
 
-    // Wir stellen sicher, dass die SNR immer als sauberer String verglichen wird
-    const snr = msg.payload && msg.payload.snr ? msg.payload.snr.toString().toUpperCase() : null;
-    
     switch (msg.topic) {
         case 'wms-vb-init-completion':
             stickUsb.scanDevices({autoAssignBlinds: false});
@@ -167,7 +177,6 @@ function callback(err, msg) {
             break;
         case 'wms-vb-blind-position-update':
             if (snr && client.connected) {
-                // Wir prüfen, ob wir das Gerät kennen (Groß/Kleinschreibung beachten)
                 if (msg.payload.position !== undefined) {
                     const pos = Math.round(msg.payload.position);
                     client.publish(`warema/${snr}/position`, pos.toString(), {retain: true});
