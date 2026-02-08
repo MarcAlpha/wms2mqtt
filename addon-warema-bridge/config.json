@@ -6,19 +6,16 @@
   "arch": ["armv7", "aarch64", "amd64"],
   "startup": "services",
   "boot": "auto",
-  "services": ["mqtt"],
   "privileged": ["SYS_RAWIO"],
   "full_access": true,
-  "devices": [
-    "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K3ATN-if00-port0",
-    "/dev/ttyUSB0",
-    "/dev/ttyUSB1"
-  ],
   "options": {
     "wms_channel": 17,
     "wms_key": "00112233445566778899AABBCCDDEEFF",
     "wms_pan_id": "FFFF",
     "wms_serial_port": "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K3ATN-if00-port0",
+    "mqtt_server": "mqtt://core-mosquitto:1883",
+    "mqtt_user": "homeassistant",
+    "mqtt_password": "",
     "polling_interval": 30000,
     "moving_interval": 1000,
     "ignored_devices": ""
@@ -27,7 +24,10 @@
     "wms_channel": "int",
     "wms_key": "str",
     "wms_pan_id": "str",
-    "wms_serial_port": "device(filter=ttyUSB|ttyACM|serial)",
+    "wms_serial_port": "str",
+    "mqtt_server": "str",
+    "mqtt_user": "str?",
+    "mqtt_password": "password?",
     "polling_interval": "int",
     "moving_interval": "int",
     "ignored_devices": "str?"
