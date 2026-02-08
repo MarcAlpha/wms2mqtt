@@ -1,29 +1,33 @@
 {
-  "name": "Warema Bridge",
+  "name": "Warema WMS Bridge",
   "version": "1.0.0",
-  "slug": "wms2mqtt",
-  "description": "Control your Warema WMS system",
-  "arch": ["aarch64", "amd64", "armv7", "i386"],
+  "slug": "warema_wms",
+  "description": "Bridge for Warema WMS USB Stick with MQTT Discovery",
+  "arch": ["armv7", "aarch64", "amd64"],
   "startup": "services",
   "boot": "auto",
-  "hassio_api": true,
-  "privileged": ["SYS_RAWIO"],
-  "devices": ["/dev/ttyUSB0:/dev/ttyUSB0"],
   "options": {
-    "wms_serial_port": "/dev/ttyUSB0",
-    "wms_channel": 17
+    "wms_channel": 17,
+    "wms_key": "00112233445566778899AABBCCDDEEFF",
+    "wms_pan_id": "FFFF",
+    "wms_serial_port": "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K3ATN-if00-port0",
+    "mqtt_server": "mqtt://core-mosquitto:1883",
+    "mqtt_user": "homeassistant",
+    "mqtt_password": "",
+    "polling_interval": 30000,
+    "moving_interval": 1000,
+    "ignored_devices": ""
   },
   "schema": {
-    "wms_key": "str?",
-    "wms_pan_id": "str?",
-    "wms_channel": "int?",
+    "wms_channel": "int",
+    "wms_key": "str",
+    "wms_pan_id": "str",
     "wms_serial_port": "str",
-    "polling_interval": "int?",
-    "moving_interval": "int?", 
-    "ignored_devices": "str?",
-    "force_devices": "str?"
-  },
-  "services": [
-    "mqtt:need"
-  ]
+    "mqtt_server": "str",
+    "mqtt_user": "str?",
+    "mqtt_password": "password?",
+    "polling_interval": "int",
+    "moving_interval": "int",
+    "ignored_devices": "str?"
+  }
 }
