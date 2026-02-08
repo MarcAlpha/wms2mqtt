@@ -142,31 +142,26 @@ function registerDevice(element) {
 
     const base_device = { identifiers: [element.snr], manufacturer: "Warema", name: `Warema ${element.snr}`, model: modelName };
 
-if (discoveryType === "sensor") {
-    // Definition der Sensoren, die eine Warema Wetterstation liefert
-    const sensors = [
-        { id: 'wind', name: 'Windgeschwindigkeit', unit: 'm/s', icon: 'mdi:weather-windy' },
-        { id: 'lumnorth', name: 'Helligkeit Nord', unit: 'lx', icon: 'mdi:brightness-5' },
-        { id: 'lumeast', name: 'Helligkeit Ost', unit: 'lx', icon: 'mdi:brightness-5' },
-        { id: 'lumwest', name: 'Helligkeit West', unit: 'lx', icon: 'mdi:brightness-5' },
-        { id: 'temp', name: 'Temperatur', unit: '°C', device_class: 'temperature', icon: 'mdi:thermometer' }
-    ];
-
-    sensors.forEach(sensor => {
-        const sensor_payload = {
-            name: `${base_device.name} ${sensor.name}`,
-            unique_id: `${element.snr}_${sensor.id}`,
-            state_topic: `warema/${element.snr}/${sensor.id}`,
-            unit_of_measurement: sensor.unit,
-            device_class: sensor.device_class || null,
-            icon: sensor.icon,
-            availability: [{ topic: bridge_state_topic }, { topic: availability_topic }],
-            device: base_device
-        };
-        // Veröffentlichung der Discovery-Config für jeden einzelnen Sensor-Wert
-        client.publish(`homeassistant/sensor/${element.snr}_${sensor.id}/config`, JSON.stringify(sensor_payload), { retain: true });
-    });
-} else {
+    if (discoveryType === "sensor") {
+        const sensors = [
+            { id: 'temperature', name: 'Temperature', unit: '°C', class: 'temperature' },
+            { id: 'illuminance', name: 'Illuminance', unit: 'lx', class: 'illuminance' },
+            { id: 'wind', name: 'Wind Speed', unit: 'm/s', class: 'wind_speed' },
+            { id: 'rain', name: 'Rain', unit: null, class: 'moisture' }
+        ];
+        sensors.forEach(s => {
+            const payload = {
+                name: `${base_device.name} ${s.name}`,
+                unique_id: `${element.snr}_${s.id}`,
+                state_topic: `warema/${element.snr}/${s.id}/state`,
+                unit_of_measurement: s.unit,
+                device_class: s.class,
+                device: base_device,
+                availability: [{ topic: bridge_state_topic }, { topic: availability_topic }]
+            };
+            client.publish(`homeassistant/sensor/${element.snr}_${s.id}/config`, JSON.stringify(payload), { retain: true });
+        });
+    } else {
         const payload = {
             name: `${base_device.name}`,
             unique_id: `${element.snr}_${discoveryType}`,
