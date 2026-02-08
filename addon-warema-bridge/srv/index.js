@@ -5,13 +5,32 @@ const fs = require('fs');
 
 process.on('SIGINT', () => process.exit(0));
 
-// --- Konfiguration laden ---
+// --- Variablen initialisieren ---
 let haOptions = {};
+let mqttUrl = 'mqtt://core-mosquitto:1883';
+let mqttUser = null;
+let mqttPassword = null;
+
+// --- HA Options laden ---
 try {
     if (fs.existsSync('/data/options.json')) {
         haOptions = JSON.parse(fs.readFileSync('/data/options.json', 'utf8'));
+        mqttUser = haOptions.mqtt_user || null;
+        mqttPassword = haOptions.mqtt_password || null;
     }
-} catch (e) { log.error("Fehler beim Laden der Optionen"); }
+} catch (e) { log.error("Fehler beim Laden der Optionen: " + e.message); }
+
+// --- MQTT Services laden (HA interner Broker) ---
+if (fs.existsSync('/data/services.json')) {
+    try {
+        const services = JSON.parse(fs.readFileSync('/data/services.json', 'utf8'));
+        if (services.mqtt) {
+            mqttUrl = `mqtt://${services.mqtt.host}:${services.mqtt.port}`;
+            mqttUser = services.mqtt.username;
+            mqttPassword = services.mqtt.password;
+        }
+    } catch (e) { log.error("Fehler beim Laden der MQTT-Services: " + e.message); }
+}
 
 const settingsPar = {
     wmsChannel: parseInt(haOptions.wms_channel) || 17,
@@ -22,7 +41,7 @@ const settingsPar = {
 
 const devices = {};
 
-// Hilfsfunktion für Sensoren
+// --- Discovery Hilfsfunktion ---
 function publishSensorConfig(snr, type, name, unit, deviceClass, icon, baseDevice) {
     const topic = `homeassistant/sensor/${snr}_${type}/config`;
     const payload = {
@@ -38,8 +57,8 @@ function publishSensorConfig(snr, type, name, unit, deviceClass, icon, baseDevic
     client.publish(topic, JSON.stringify(payload), { retain: true });
 }
 
+// --- Geräte-Registrierung ---
 function registerDevice(element) {
-    // Wir nehmen die SNR direkt als String, wie sie vom Stick-Scan kommt (z.B. "CC1920")
     const snr = element.snr.toString().toUpperCase();
     if (devices[snr]) return;
 
@@ -127,6 +146,7 @@ function registerDevice(element) {
     client.publish(`warema/${snr}/availability`, 'online', { retain: true });
 }
 
+// --- Callback Logic ---
 function callback(err, msg) {
     if (err || !msg) return;
     const snr = msg.payload && msg.payload.snr ? msg.payload.snr.toString().toUpperCase() : null;
@@ -161,10 +181,12 @@ function callback(err, msg) {
     }
 }
 
+// --- Initialisierung & Connect ---
 const stickUsb = new warema(settingsPar.wmsSerialPort, settingsPar.wmsChannel, settingsPar.wmsPanid, settingsPar.wmsKey, {}, callback);
 const client = mqtt.connect(mqttUrl, { username: mqttUser, password: mqttPassword });
 
 client.on('connect', () => {
+    log.info('MQTT verbunden.');
     client.publish('warema/bridge/state', 'online', {retain: true});
     client.subscribe(['warema/+/set', 'warema/+/set_position', 'warema/+/set_tilt']);
 });
