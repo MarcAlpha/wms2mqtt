@@ -157,7 +157,7 @@ function registerDevice(element) {
         client.publish(`homeassistant/${discoveryType}/${element.snr}/config`, JSON.stringify(payload), { retain: true });
     }
 
-    devices[element.snr] = { type: element.type };
+    devices[element.snr] = { type: element.type, position: 0 };
     if (element.type !== "63" && element.type !== "06") {
         stickUsb.vnBlindAdd(parseInt(element.snr), element.snr.toString());
     }
@@ -188,6 +188,10 @@ function callback(err, msg) {
             case 'wms-vb-blind-position-update':
                 if (typeof msg.payload.position !== "undefined" && client && client.connected) {
                     client.publish(`warema/${msg.payload.snr}/position`, msg.payload.position.toString(), {retain: true});
+                    if (devices[msg.payload.snr]) devices[msg.payload.snr].position = msg.payload.position;
+                }
+                if (typeof msg.payload.angle !== "undefined" && client && client.connected) {
+                    client.publish(`warema/${msg.payload.snr}/tilt`, msg.payload.angle.toString(), {retain: true});
                 }
                 break;
         }
@@ -210,13 +214,26 @@ client.on('connect', function () {
 });
 
 client.on('message', function (topic, message) {
-    let [scope, device, command] = topic.split('/');
-    message = message.toString();
+    const topicArray = topic.split('/');
+    const deviceSnr = topicArray[1];
+    const command = topicArray[2];
+    const payload = message.toString().trim();
+
+    log.info(`MQTT Received -> Device: ${deviceSnr}, Command: ${command}, Payload: ${payload}`);
+
     if (command === 'set') {
-        if (message === 'CLOSE') stickUsb.vnBlindSetPosition(device, 100, 0);
-        else if (message === 'OPEN') stickUsb.vnBlindSetPosition(device, 0, 0);
-        else if (message === 'STOP') stickUsb.vnBlindStop(device);
+        switch (payload) {
+            case 'CLOSE': stickUsb.vnBlindSetPosition(deviceSnr, 100, 0); break;
+            case 'OPEN':  stickUsb.vnBlindSetPosition(deviceSnr, 0, 0); break;
+            case 'STOP':  stickUsb.vnBlindStop(deviceSnr); break;
+        }
     } else if (command === 'set_position') {
-        stickUsb.vnBlindSetPosition(device, parseInt(message));
+        const pos = parseInt(payload);
+        stickUsb.vnBlindSetPosition(deviceSnr, pos);
+    } else if (command === 'set_tilt') {
+        const tilt = parseInt(payload);
+        const currentPos = (devices[deviceSnr] && devices[deviceSnr].position) || 0;
+        log.info(`Setting tilt to ${tilt}% at current position ${currentPos}%`);
+        stickUsb.vnBlindSetPosition(deviceSnr, currentPos, tilt);
     }
 });
