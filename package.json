@@ -1,7 +1,7 @@
 {
   "name": "wms2mqtt",
   "scripts": {
-    "start": "node warema-bridge/srv/index.js",
+    "start": "node addon-warema-bridge/srv/index.js",
     "build": "docker buildx build --tag wms2mqtt:latest --platform linux/amd64,linux/arm64,linux/arm/v7 -f Dockerfile ."
   },
   "dependencies": {
