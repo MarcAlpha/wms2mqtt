@@ -22,6 +22,6 @@ FROM node:22-alpine as app
 COPY --from=builder app/node_modules ./node_modules
 
 # Copy root filesystem
-COPY warema-bridge/srv .
+COPY addon-warema-bridge/srv .
 
 CMD ["node", "index.js"]
