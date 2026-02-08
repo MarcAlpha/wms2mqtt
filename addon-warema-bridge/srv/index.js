@@ -18,10 +18,27 @@ try {
     log.error('Failed to load /data/options.json: ' + err.message);
 }
 
-// Konfigurations-Mapping
-const mqttServer = haOptions.mqtt_server || process.env.MQTT_SERVER || 'mqtt://localhost';
-const mqttUser = haOptions.mqtt_user || process.env.MQTT_USER || null;
-const mqttPassword = haOptions.mqtt_password || process.env.MQTT_PASSWORD || null;
+// --- MQTT Konfiguration (Auto-Discovery oder Manuell) ---
+let mqttUrl = 'mqtt://localhost';
+let mqttUser = haOptions.mqtt_user || null;
+let mqttPassword = haOptions.mqtt_password || null;
+
+// Prüfen, ob HA den MQTT-Service bereitstellt (automatisch)
+if (fs.existsSync('/data/services.json')) {
+    try {
+        const services = JSON.parse(fs.readFileSync('/data/services.json', 'utf8'));
+        if (services.mqtt) {
+            mqttUrl = `mqtt://${services.mqtt.host}:${services.mqtt.port}`;
+            mqttUser = services.mqtt.username;
+            mqttPassword = services.mqtt.password;
+            log.info(`MQTT credentials automatically loaded from Home Assistant for user: ${mqttUser}`);
+        }
+    } catch (err) {
+        log.error('Failed to parse /data/services.json: ' + err.message);
+    }
+} else if (haOptions.mqtt_server) {
+    mqttUrl = haOptions.mqtt_server;
+}
 
 const ignoredDevices = (haOptions.ignored_devices || process.env.IGNORED_DEVICES || "").split(',').map(s => s.trim()).filter(d => d);
 const pollingInterval = parseInt(haOptions.polling_interval || process.env.POLLING_INTERVAL || 30000);
@@ -85,7 +102,6 @@ function registerDevice(element) {
     let discoveryType = "cover"; 
     let extraConfig = {};
 
-    // Typerkennung
     switch (element.type) {
         case "06": modelName = "WMS Weather Station (basic)"; discoveryType = "sensor"; break;
         case "20": modelName = "WMS Plug receiver"; break;
@@ -114,7 +130,6 @@ function registerDevice(element) {
     };
 
     if (discoveryType === "sensor") {
-        // Discovery für Wetter-Sensoren
         const sensors = [
             { id: 'temperature', name: 'Temperature', unit: '°C', class: 'temperature' },
             { id: 'illuminance', name: 'Illuminance', unit: 'lx', class: 'illuminance' },
@@ -134,7 +149,6 @@ function registerDevice(element) {
             client.publish(`homeassistant/sensor/${element.snr}_${s.id}/config`, JSON.stringify(payload), { retain: true });
         });
     } else {
-        // Discovery für Aktoren (Rolladen, Licht, Schalter)
         const payload = {
             name: `${base_device.name}`,
             unique_id: `${element.snr}_${discoveryType}`,
@@ -199,16 +213,15 @@ function callback(err, msg) {
     }
 }
 
-// Stick Initialisierung
 const stickUsb = new warema(settingsPar.wmsSerialPort, settingsPar.wmsChannel, settingsPar.wmsPanid, settingsPar.wmsKey, {}, callback);
 
 if (settingsPar.wmsPanid === 'FFFF') {
-    log.warn('PAN-ID is FFFF. Add-on is in JOIN mode. Check logs for network parameters.');
+    log.warn('PAN-ID is FFFF. Add-on is in JOIN mode.');
     return;
 }
 
-// MQTT Verbindung
-const client = mqtt.connect(mqttServer, {
+// MQTT Verbindung mit den (automatisch) ermittelten Daten
+const client = mqtt.connect(mqttUrl, {
     username: mqttUser, password: mqttPassword, protocolVersion: 4,
     will: { topic: 'warema/bridge/state', payload: 'offline', retain: true }
 });
@@ -222,8 +235,6 @@ client.on('connect', function () {
 client.on('message', function (topic, message) {
     let [scope, device, command] = topic.split('/');
     message = message.toString();
-    log.debug(`MQTT Message: ${device} -> ${command} (${message})`);
-
     if (command === 'set') {
         switch (message) {
             case 'CLOSE': stickUsb.vnBlindSetPosition(device, 100, 0); break;
@@ -235,7 +246,6 @@ client.on('message', function (topic, message) {
     } else if (command === 'set_position') {
         stickUsb.vnBlindSetPosition(device, parseInt(message));
     } else if (command === 'set_tilt') {
-        // Für Lamellendächer: Position beibehalten, nur Winkel ändern
         const currentPos = (devices[device] && devices[device].position) || 0;
         stickUsb.vnBlindSetPosition(device, parseInt(currentPos), parseInt(message));
     }
