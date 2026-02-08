@@ -1,7 +1,7 @@
 {
   "name": "Warema WMS Bridge",
   "version": "1.0.0",
-  "slug": "warema_wms",
+  "slug": "wms2mqtt",
   "description": "Bridge for Warema WMS USB Stick with MQTT Discovery",
   "arch": ["armv7", "aarch64", "amd64"],
   "startup": "services",
