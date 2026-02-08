@@ -1,14 +1,11 @@
 {
   "name": "Warema WMS Bridge",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "slug": "wms2mqtt",
   "description": "Bridge for Warema WMS USB Stick with MQTT Discovery",
   "arch": ["armv7", "aarch64", "amd64"],
   "startup": "services",
   "boot": "auto",
-  "services": ["mqtt"],
-  "mqtt": true,
-  "hassio_api": true,
   "privileged": ["SYS_RAWIO"],
   "full_access": true,
   "options": {
@@ -16,6 +13,9 @@
     "wms_key": "00112233445566778899AABBCCDDEEFF",
     "wms_pan_id": "FFFF",
     "wms_serial_port": "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K3ATN-if00-port0",
+    "mqtt_server": "mqtt://core-mosquitto:1883",
+    "mqtt_user": "homeassistant",
+    "mqtt_password": "",
     "polling_interval": 30000,
     "moving_interval": 1000,
     "ignored_devices": ""
@@ -25,6 +25,9 @@
     "wms_key": "str",
     "wms_pan_id": "str",
     "wms_serial_port": "str",
+    "mqtt_server": "str",
+    "mqtt_user": "str?",
+    "mqtt_password": "password?",
     "polling_interval": "int",
     "moving_interval": "int",
     "ignored_devices": "str?"
