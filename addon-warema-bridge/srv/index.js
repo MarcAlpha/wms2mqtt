@@ -142,24 +142,29 @@ function registerDevice(element) {
 
     const base_device = { identifiers: [element.snr], manufacturer: "Warema", name: `Warema ${element.snr}`, model: modelName };
 
-    if (discoveryType === "sensor") {
+if (discoveryType === "sensor") {
         const sensors = [
-            { id: 'temperature', name: 'Temperature', unit: '°C', class: 'temperature' },
-            { id: 'illuminance', name: 'Illuminance', unit: 'lx', class: 'illuminance' },
-            { id: 'wind', name: 'Wind Speed', unit: 'm/s', class: 'wind_speed' },
-            { id: 'rain', name: 'Rain', unit: null, class: 'moisture' }
+            { id: 'temperature', name: 'Temperature', unit: '°C', class: 'temperature', component: 'sensor' },
+            { id: 'illuminance', name: 'Illuminance', unit: 'lx', class: 'illuminance', component: 'sensor' },
+            { id: 'wind', name: 'Wind Speed', unit: 'm/s', class: 'wind_speed', component: 'sensor' },
+            { id: 'rain', name: 'Rain', unit: null, class: 'moisture', component: 'binary_sensor' } // Als Binary Sensor für Regen An/Aus
         ];
         sensors.forEach(s => {
             const payload = {
                 name: `${base_device.name} ${s.name}`,
                 unique_id: `${element.snr}_${s.id}`,
                 state_topic: `warema/${element.snr}/${s.id}/state`,
-                unit_of_measurement: s.unit,
-                device_class: s.class,
                 device: base_device,
                 availability: [{ topic: bridge_state_topic }, { topic: availability_topic }]
             };
-            client.publish(`homeassistant/sensor/${element.snr}_${s.id}/config`, JSON.stringify(payload), { retain: true });
+            if (s.unit) payload.unit_of_measurement = s.unit;
+            if (s.class) payload.device_class = s.class;
+            if (s.component === 'binary_sensor') {
+                payload.payload_on = "ON";
+                payload.payload_off = "OFF";
+            }
+            
+            client.publish(`homeassistant/${s.component}/${element.snr}_${s.id}/config`, JSON.stringify(payload), { retain: true });
         });
     } else {
         const payload = {
