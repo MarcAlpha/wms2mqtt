@@ -3,21 +3,25 @@ const log = require('./logger');
 const mqtt = require('mqtt');
 const fs = require('fs');
 
-process.on('SIGINT', () => process.exit(0));
+process.on('SIGINT', function () {
+    process.exit(0);
+});
 
-// --- MQTT & HA Setup (Fix für die Abstürze) ---
+// --- Home Assistant Options Loader ---
 let haOptions = {};
-let mqttUrl = 'mqtt://core-mosquitto:1883';
-let mqttUser = null;
-let mqttPassword = null;
-
-try {
-    if (fs.existsSync('/data/options.json')) {
+if (fs.existsSync('/data/options.json')) {
+    try {
         haOptions = JSON.parse(fs.readFileSync('/data/options.json', 'utf8'));
-        mqttUser = haOptions.mqtt_user || null;
-        mqttPassword = haOptions.mqtt_password || null;
+        log.info('Home Assistant options loaded successfully.');
+    } catch (err) {
+        log.error('Failed to parse /data/options.json: ' + err.message);
     }
-} catch (e) { log.error("Fehler Optionen"); }
+}
+
+// --- MQTT Konfiguration ---
+let mqttUrl = 'mqtt://core-mosquitto:1883';
+let mqttUser = haOptions.mqtt_user || null;
+let mqttPassword = haOptions.mqtt_password || null;
 
 if (fs.existsSync('/data/services.json')) {
     try {
@@ -26,9 +30,19 @@ if (fs.existsSync('/data/services.json')) {
             mqttUrl = `mqtt://${services.mqtt.host}:${services.mqtt.port}`;
             mqttUser = services.mqtt.username;
             mqttPassword = services.mqtt.password;
+            log.info(`MQTT credentials auto-loaded for user: ${mqttUser}`);
         }
-    } catch (e) { log.error("Fehler Services"); }
+    } catch (err) {
+        log.error('Failed to parse /data/services.json');
+    }
 }
+
+const ignoredDevices = haOptions.ignored_devices 
+    ? haOptions.ignored_devices.split(',').map(s => s.trim()).filter(d => d !== "")
+    : [];
+
+const pollingInterval = parseInt(haOptions.polling_interval) || 30000;
+const movingInterval = parseInt(haOptions.moving_interval) || 1000;
 
 const settingsPar = {
     wmsChannel: parseInt(haOptions.wms_channel) || 17,
@@ -37,118 +51,189 @@ const settingsPar = {
     wmsSerialPort: haOptions.wms_serial_port || '/dev/ttyUSB0',
 };
 
-const devices = {};
+const devices = [];
+const weatherCache = new Map(); 
 
-// --- Discovery ---
-function publishSensorConfig(snr, type, name, unit, deviceClass, icon, baseDevice) {
-    const topic = `homeassistant/sensor/${snr}_${type}/config`;
-    const payload = {
-        name: `Warema ${snr} ${name}`,
-        unique_id: `warema_${snr}_${type}`,
-        state_topic: `warema/${snr}/${type}/state`,
-        unit_of_measurement: unit,
-        device_class: deviceClass,
-        icon: icon,
-        device: baseDevice,
-        availability: [{ topic: 'warema/bridge/state' }, { topic: `warema/${snr}/availability` }]
-    };
-    client.publish(topic, JSON.stringify(payload), { retain: true });
+log.info(`Config: Port=${settingsPar.wmsSerialPort}, Channel=${settingsPar.wmsChannel}, PAN-ID=${settingsPar.wmsPanid}`);
+
+/**
+ * Hilfsfunktionen
+ */
+function publishWeatherData(snr, data) {
+    if (typeof client !== 'undefined' && client && client.connected) {
+        client.publish(`warema/${snr}/illuminance/state`, data.lumen.toString(), {retain: true});
+        client.publish(`warema/${snr}/temperature/state`, data.temp.toString(), {retain: true});
+        client.publish(`warema/${snr}/wind/state`, data.wind.toString(), {retain: true});
+        client.publish(`warema/${snr}/rain/state`, data.rain ? 'ON' : 'OFF', {retain: true});
+    }
 }
 
-// --- Registrierung (Original Logik) ---
+function pollWeatherData() {
+    try {
+        const weatherData = stickUsb.getLastWeatherBroadcast();
+        if (weatherData && weatherData.snr) {
+            if (!devices[weatherData.snr]) registerDevice({snr: weatherData.snr, type: "63"});
+            
+            const weatherHash = `${weatherData.temp}_${weatherData.wind}_${weatherData.lumen}_${weatherData.rain}`;
+            const cached = weatherCache.get(weatherData.snr);
+            
+            if (!cached || cached.hash !== weatherHash || (Date.now() - cached.timestamp) > 10000) {
+                publishWeatherData(weatherData.snr, weatherData);
+                weatherCache.set(weatherData.snr, { hash: weatherHash, timestamp: Date.now() });
+            }
+        }
+    } catch (error) { log.error('Error polling weather: ' + error.toString()); }
+}
+
 function registerDevice(element) {
-    const snr = element.snr.toString().toUpperCase();
-    if (devices[snr]) return;
-
-    const baseDevice = { identifiers: [snr], manufacturer: "Warema", name: `Warema ${snr}` };
-    let discoveryType = "cover";
-
-    if (["06", "63"].includes(element.type)) discoveryType = "sensor";
-
-    if (discoveryType === "cover") {
-        const payload = {
-            name: `Warema ${snr}`,
-            unique_id: `warema_${snr}_cover`,
-            device: baseDevice,
-            state_topic: `warema/${snr}/state`,
-            command_topic: `warema/${snr}/set`,
-            position_topic: `warema/${snr}/position`,
-            set_position_topic: `warema/${snr}/set_position`,
-            tilt_status_topic: `warema/${snr}/tilt`,
-            tilt_command_topic: `warema/${snr}/set_tilt`,
-            device_class: "shutter",
-            payload_open: "OPEN", payload_close: "CLOSE", payload_stop: "STOP",
-            position_open: 0, position_closed: 100,
-            availability: [{ topic: 'warema/bridge/state' }, { topic: `warema/${snr}/availability` }]
-        };
-        client.publish(`homeassistant/cover/${snr}/config`, JSON.stringify(payload), { retain: true });
-        stickUsb.vnBlindAdd(snr, snr);
-    } else if (discoveryType === "sensor") {
-        publishSensorConfig(snr, 'temperature', 'Temperatur', '°C', 'temperature', 'mdi:thermometer', baseDevice);
-        publishSensorConfig(snr, 'luminance', 'Helligkeit', 'lx', 'illuminance', 'mdi:brightness-5', baseDevice);
-        publishSensorConfig(snr, 'wind', 'Windgeschwindigkeit', 'm/s', 'wind_speed', 'mdi:weather-windy', baseDevice);
-        publishSensorConfig(snr, 'rain', 'Regen', '', '', 'mdi:weather-rainy', baseDevice);
+    if (devices[element.snr]) return;
+    if (ignoredDevices.includes(element.snr.toString())) {
+        log.info(`Device ${element.snr} is ignored.`);
+        return;
     }
 
-    devices[snr] = { position: 0, tilt: 0 };
-    client.publish(`warema/${snr}/availability`, 'online', { retain: true });
-}
-
-// --- Callback ---
-function callback(err, msg) {
-    if (err || !msg) return;
-    const snr = (msg.payload && msg.payload.snr) ? msg.payload.snr.toString().toUpperCase() : null;
+    const availability_topic = `warema/${element.snr}/availability`;
+    const bridge_state_topic = 'warema/bridge/state';
     
-    switch (msg.topic) {
-        case 'wms-vb-init-completion':
-            stickUsb.scanDevices({autoAssignBlinds: false});
+    let modelName = "Unknown WMS Device";
+    let discoveryType = "cover"; 
+    let extraConfig = {};
+
+    switch (element.type) {
+        case "06": modelName = "WMS Weather Station (basic)"; discoveryType = "sensor"; break;
+        case "20": modelName = "WMS Plug receiver"; break;
+        case "21": modelName = "WMS Actuator UP"; break;
+        case "25": modelName = "WMS Vertical awning"; break;
+        case "2A": 
+            modelName = "WMS Slat roof"; 
+            extraConfig = { 
+                tilt_status_topic: `warema/${element.snr}/tilt`, 
+                tilt_command_topic: `warema/${element.snr}/set_tilt`,
+                tilt_closed_value: 100, tilt_opened_value: 0
+            };
             break;
-        case 'wms-vb-scanned-devices':
-            msg.payload.devices.forEach(d => registerDevice(d));
-            break;
-        case 'wms-vb-blind-position-update':
-            if (snr && client.connected) {
-                if (msg.payload.position !== undefined) {
-                    client.publish(`warema/${snr}/position`, Math.round(msg.payload.position).toString(), {retain: true});
-                }
-                if (msg.payload.angle !== undefined) {
-                    client.publish(`warema/${snr}/tilt`, Math.round(msg.payload.angle).toString(), {retain: true});
-                }
-            }
-            break;
-        case 'wms-vb-weather-update':
-            if (snr && client.connected) {
-                if (msg.payload.temp !== undefined) client.publish(`warema/${snr}/temperature/state`, msg.payload.temp.toString(), {retain: true});
-                if (msg.payload.lumi !== undefined) client.publish(`warema/${snr}/luminance/state`, msg.payload.lumi.toString(), {retain: true});
-                if (msg.payload.wind !== undefined) client.publish(`warema/${snr}/wind/state`, msg.payload.wind.toString(), {retain: true});
-                if (msg.payload.rain !== undefined) client.publish(`warema/${snr}/rain/state`, msg.payload.rain ? "ON" : "OFF", {retain: true});
-            }
-            break;
+        case "24": modelName = "WMS Smart socket"; discoveryType = "switch"; break;
+        case "28": modelName = "WMS LED"; discoveryType = "light"; break;
+        case "63": modelName = "WMS Weather station pro"; discoveryType = "sensor"; break;
+    }
+
+    const base_device = { identifiers: [element.snr], manufacturer: "Warema", name: `Warema ${element.snr}`, model: modelName };
+
+    if (discoveryType === "sensor") {
+        const sensors = [
+            { id: 'temperature', name: 'Temperature', unit: '°C', class: 'temperature' },
+            { id: 'illuminance', name: 'Illuminance', unit: 'lx', class: 'illuminance' },
+            { id: 'wind', name: 'Wind Speed', unit: 'm/s', class: 'wind_speed' },
+            { id: 'rain', name: 'Rain', unit: null, class: 'moisture' }
+        ];
+        sensors.forEach(s => {
+            const payload = {
+                name: `${base_device.name} ${s.name}`,
+                unique_id: `${element.snr}_${s.id}`,
+                state_topic: `warema/${element.snr}/${s.id}/state`,
+                unit_of_measurement: s.unit,
+                device_class: s.class,
+                device: base_device,
+                availability: [{ topic: bridge_state_topic }, { topic: availability_topic }]
+            };
+            client.publish(`homeassistant/sensor/${element.snr}_${s.id}/config`, JSON.stringify(payload), { retain: true });
+        });
+    } else {
+        const payload = {
+            name: `${base_device.name}`,
+            unique_id: `${element.snr}_${discoveryType}`,
+            state_topic: `warema/${element.snr}/state`,
+            command_topic: `warema/${element.snr}/set`,
+            availability: [{ topic: bridge_state_topic }, { topic: availability_topic }],
+            device: base_device,
+            ...extraConfig
+        };
+        if (discoveryType === "cover") {
+            payload.position_topic = `warema/${element.snr}/position`;
+            payload.set_position_topic = `warema/${element.snr}/set_position`;
+            payload.payload_open = "OPEN"; payload.payload_close = "CLOSE"; payload.payload_stop = "STOP";
+            payload.position_open = 0; payload.position_closed = 100;
+        }
+        client.publish(`homeassistant/${discoveryType}/${element.snr}/config`, JSON.stringify(payload), { retain: true });
+    }
+
+    devices[element.snr] = { type: element.type, position: 0 };
+    if (element.type !== "63" && element.type !== "06") {
+        stickUsb.vnBlindAdd(parseInt(element.snr), element.snr.toString());
+    }
+    
+    if (client.connected) {
+        client.publish(availability_topic, 'online', { retain: true });
     }
 }
 
-const stickUsb = new warema(settingsPar.wmsSerialPort, settingsPar.wmsChannel, settingsPar.wmsPanid, settingsPar.wmsKey, {}, callback);
-const client = mqtt.connect(mqttUrl, { username: mqttUser, password: mqttPassword });
+function callback(err, msg) {
+    if (err) { log.error(err); return; }
+    if (msg) {
+        switch (msg.topic) {
+            case 'wms-vb-init-completion':
+                log.info('Warema WMS initialized.');
+                stickUsb.setPosUpdInterval(pollingInterval);
+                stickUsb.setWatchMovingBlindsInterval(movingInterval);
+                stickUsb.scanDevices({autoAssignBlinds: false});
+                break;
+            case 'wms-vb-scanned-devices':
+                log.info(`Scan finished. Found ${msg.payload.devices.length} devices.`);
+                msg.payload.devices.forEach(element => registerDevice(element));
+                break;
+            case 'wms-vb-rcv-weather-broadcast':
+                if (!devices[msg.payload.weather.snr]) registerDevice({snr: msg.payload.weather.snr, type: "63"});
+                publishWeatherData(msg.payload.weather.snr, msg.payload.weather);
+                break;
+            case 'wms-vb-blind-position-update':
+                if (typeof msg.payload.position !== "undefined" && client && client.connected) {
+                    client.publish(`warema/${msg.payload.snr}/position`, msg.payload.position.toString(), {retain: true});
+                    if (devices[msg.payload.snr]) devices[msg.payload.snr].position = msg.payload.position;
+                }
+                if (typeof msg.payload.angle !== "undefined" && client && client.connected) {
+                    client.publish(`warema/${msg.payload.snr}/tilt`, msg.payload.angle.toString(), {retain: true});
+                }
+                break;
+        }
+    }
+}
 
-client.on('connect', () => {
-    client.publish('warema/bridge/state', 'online', {retain: true});
-    client.subscribe(['warema/+/set', 'warema/+/set_position', 'warema/+/set_tilt']);
+// --- Initialisierung ---
+const stickUsb = new warema(settingsPar.wmsSerialPort, settingsPar.wmsChannel, settingsPar.wmsPanid, settingsPar.wmsKey, {}, callback);
+
+const client = mqtt.connect(mqttUrl, {
+    username: mqttUser, password: mqttPassword, protocolVersion: 4,
+    will: { topic: 'warema/bridge/state', payload: 'offline', retain: true }
 });
 
-client.on('message', (topic, message) => {
-    const parts = topic.split('/');
-    const snr = parts[1];
-    const cmd = parts[2];
-    if (!devices[snr]) return;
+client.on('connect', function () {
+    log.info('Connected to MQTT Broker.');
+    client.publish('warema/bridge/state', 'online', {retain: true});
+    client.subscribe(['warema/+/set', 'warema/+/set_position', 'warema/+/set_tilt']);
+    setInterval(pollWeatherData, pollingInterval);
+});
+
+client.on('message', function (topic, message) {
+    const topicArray = topic.split('/');
+    const deviceSnr = topicArray[1];
+    const command = topicArray[2];
     const payload = message.toString().trim();
 
-    if (cmd === 'set') {
-        if (payload === 'CLOSE') stickUsb.vnBlindSetPosition(snr, 100, 0);
-        else if (payload === 'OPEN') stickUsb.vnBlindSetPosition(snr, 0, 0);
-        else if (payload === 'STOP') stickUsb.vnBlindStop(snr);
-    } else if (cmd === 'set_position') {
-        stickUsb.vnBlindSetPosition(snr, parseInt(payload), devices[snr].tilt || 0);
-    } else if (cmd === 'set_tilt') {
-        stickUsb.vnBlindSetPosition(snr, devices[snr].position || 0, parseInt(payload));
+    log.info(`MQTT Received -> Device: ${deviceSnr}, Command: ${command}, Payload: ${payload}`);
+
+    if (command === 'set') {
+        switch (payload) {
+            case 'CLOSE': stickUsb.vnBlindSetPosition(deviceSnr, 100, 0); break;
+            case 'OPEN':  stickUsb.vnBlindSetPosition(deviceSnr, 0, 0); break;
+            case 'STOP':  stickUsb.vnBlindStop(deviceSnr); break;
+        }
+    } else if (command === 'set_position') {
+        const pos = parseInt(payload);
+        stickUsb.vnBlindSetPosition(deviceSnr, pos);
+    } else if (command === 'set_tilt') {
+        const tilt = parseInt(payload);
+        const currentPos = (devices[deviceSnr] && devices[deviceSnr].position) || 0;
+        log.info(`Setting tilt to ${tilt}% at current position ${currentPos}%`);
+        stickUsb.vnBlindSetPosition(deviceSnr, currentPos, tilt);
     }
 });
