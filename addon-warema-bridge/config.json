@@ -1,6 +1,6 @@
 {
   "name": "Warema WMS Bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "slug": "wms2mqtt",
   "description": "Bridge for Warema WMS USB Stick with MQTT Discovery",
   "arch": ["armv7", "aarch64", "amd64"],
@@ -11,7 +11,6 @@
   "hassio_api": true,
   "privileged": ["SYS_RAWIO"],
   "full_access": true,
-  "devices": ["/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AV0K3ATN-if00-port0"],
   "options": {
     "wms_channel": 17,
     "wms_key": "00112233445566778899AABBCCDDEEFF",
