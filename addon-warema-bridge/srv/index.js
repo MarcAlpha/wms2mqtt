@@ -216,11 +216,26 @@ function callback(err, msg) {
                 break;
             case 'wms-vb-blind-position-update':
                 if (typeof msg.payload.position !== "undefined" && client && client.connected) {
-                    client.publish(`warema/${msg.payload.snr}/position`, msg.payload.position.toString(), {retain: true});
-                    if (devices[msg.payload.snr]) devices[msg.payload.snr].position = msg.payload.position;
+                    const snr = msg.payload.snr;
+                    const pos = Math.round(msg.payload.position);
+                    
+                    // 1. Position an HA senden (für den Schieberegler)
+                    client.publish(`warema/${snr}/position`, pos.toString(), {retain: true});
+            
+                    // 2. Den Status berechnen und senden (für das Icon und "Geschlossen"-Text)
+                    // WICHTIG: Warema 100% = Geschlossen (unten)
+                    let haState = (pos >= 100) ? "closed" : "open";
+                    
+                    client.publish(`warema/${snr}/state`, haState, {retain: true});
+            
+                    if (devices[snr]) {
+                        devices[snr].position = pos;
+                    }
+                    
+                    log.info(`Update ${snr}: Position ${pos}%, Status: ${haState}`);
                 }
                 if (typeof msg.payload.angle !== "undefined" && client && client.connected) {
-                    client.publish(`warema/${msg.payload.snr}/tilt`, msg.payload.angle.toString(), {retain: true});
+                    client.publish(`warema/${msg.payload.snr}/tilt`, Math.round(msg.payload.angle).toString(), {retain: true});
                 }
                 break;
         }
