@@ -6,6 +6,8 @@
   "arch": ["armv7", "aarch64", "amd64"],
   "startup": "services",
   "boot": "auto",
+  "privileged": ["SYS_RAWIO"],
+  "full_access": true,
   "options": {
     "wms_channel": 17,
     "wms_key": "00112233445566778899AABBCCDDEEFF",
