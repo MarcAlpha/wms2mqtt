@@ -5,28 +5,13 @@ const fs = require('fs');
 
 process.on('SIGINT', () => process.exit(0));
 
-// --- HA Options & MQTT Setup ---
+// --- Konfiguration laden ---
 let haOptions = {};
 try {
     if (fs.existsSync('/data/options.json')) {
         haOptions = JSON.parse(fs.readFileSync('/data/options.json', 'utf8'));
     }
 } catch (e) { log.error("Fehler beim Laden der Optionen"); }
-
-let mqttUrl = 'mqtt://core-mosquitto:1883';
-let mqttUser = haOptions.mqtt_user || null;
-let mqttPassword = haOptions.mqtt_password || null;
-
-if (fs.existsSync('/data/services.json')) {
-    try {
-        const services = JSON.parse(fs.readFileSync('/data/services.json', 'utf8'));
-        if (services.mqtt) {
-            mqttUrl = `mqtt://${services.mqtt.host}:${services.mqtt.port}`;
-            mqttUser = services.mqtt.username;
-            mqttPassword = services.mqtt.password;
-        }
-    } catch (e) { log.error("Fehler beim Laden der MQTT-Services"); }
-}
 
 const settingsPar = {
     wmsChannel: parseInt(haOptions.wms_channel) || 17,
@@ -37,7 +22,7 @@ const settingsPar = {
 
 const devices = {};
 
-// Hilfsfunktion für Sensoren (Wetterstation)
+// Hilfsfunktion für Sensoren
 function publishSensorConfig(snr, type, name, unit, deviceClass, icon, baseDevice) {
     const topic = `homeassistant/sensor/${snr}_${type}/config`;
     const payload = {
@@ -54,7 +39,8 @@ function publishSensorConfig(snr, type, name, unit, deviceClass, icon, baseDevic
 }
 
 function registerDevice(element) {
-    const snr = element.snr.toString(16).toUpperCase();
+    // Wir nehmen die SNR direkt als String, wie sie vom Stick-Scan kommt (z.B. "CC1920")
+    const snr = element.snr.toString().toUpperCase();
     if (devices[snr]) return;
 
     const baseDevice = {
@@ -67,7 +53,6 @@ function registerDevice(element) {
     let deviceClass = "shutter";
     let hasTilt = false;
 
-    // --- Dynamische Typ-Erkennung ---
     switch (element.type) {
         case "20":
             baseDevice.model = "WMS Zwischenstecker (Raffstore)";
@@ -80,7 +65,6 @@ function registerDevice(element) {
         case "25":
             baseDevice.model = "WMS Markisen-Aktor";
             deviceClass = "awning";
-            hasTilt = false;
             break;
         case "2A":
             baseDevice.model = "WMS Lamellendach";
@@ -97,7 +81,6 @@ function registerDevice(element) {
             break;
         default:
             baseDevice.model = `WMS Gerät (Typ ${element.type})`;
-            hasTilt = false;
     }
 
     if (discoveryType === "cover") {
@@ -140,43 +123,41 @@ function registerDevice(element) {
         client.publish(`homeassistant/switch/${snr}/config`, JSON.stringify(payload), { retain: true });
     }
 
-    // Wir initialisieren tilt mit 0
     devices[snr] = { type: element.type, position: 0, tilt: 0 };
     client.publish(`warema/${snr}/availability`, 'online', { retain: true });
 }
 
 function callback(err, msg) {
-    if (err) return;
-    if (msg) {
-        const snr = msg.payload && msg.payload.snr ? msg.payload.snr.toString(16).toUpperCase() : null;
-        switch (msg.topic) {
-            case 'wms-vb-init-completion':
-                stickUsb.scanDevices({autoAssignBlinds: false});
-                break;
-            case 'wms-vb-scanned-devices':
-                msg.payload.devices.forEach(d => registerDevice(d));
-                break;
-            case 'wms-vb-blind-position-update':
-                if (snr && client.connected) {
-                    if (msg.payload.position !== undefined) {
-                        client.publish(`warema/${snr}/position`, msg.payload.position.toString(), {retain: true});
-                        if (devices[snr]) devices[snr].position = msg.payload.position;
-                    }
-                    if (msg.payload.angle !== undefined) {
-                        client.publish(`warema/${snr}/tilt`, msg.payload.angle.toString(), {retain: true});
-                        if (devices[snr]) devices[snr].tilt = msg.payload.angle;
-                    }
+    if (err || !msg) return;
+    const snr = msg.payload && msg.payload.snr ? msg.payload.snr.toString().toUpperCase() : null;
+    
+    switch (msg.topic) {
+        case 'wms-vb-init-completion':
+            stickUsb.scanDevices({autoAssignBlinds: false});
+            break;
+        case 'wms-vb-scanned-devices':
+            msg.payload.devices.forEach(d => registerDevice(d));
+            break;
+        case 'wms-vb-blind-position-update':
+            if (snr && client.connected) {
+                if (msg.payload.position !== undefined) {
+                    client.publish(`warema/${snr}/position`, msg.payload.position.toString(), {retain: true});
+                    if (devices[snr]) devices[snr].position = msg.payload.position;
                 }
-                break;
-            case 'wms-vb-weather-update':
-                if (snr && client.connected) {
-                    if (msg.payload.temp !== undefined) client.publish(`warema/${snr}/temperature/state`, msg.payload.temp.toString(), {retain: true});
-                    if (msg.payload.lumi !== undefined) client.publish(`warema/${snr}/luminance/state`, msg.payload.lumi.toString(), {retain: true});
-                    if (msg.payload.wind !== undefined) client.publish(`warema/${snr}/wind/state`, msg.payload.wind.toString(), {retain: true});
-                    if (msg.payload.rain !== undefined) client.publish(`warema/${snr}/rain/state`, msg.payload.rain ? "ON" : "OFF", {retain: true});
+                if (msg.payload.angle !== undefined) {
+                    client.publish(`warema/${snr}/tilt`, msg.payload.angle.toString(), {retain: true});
+                    if (devices[snr]) devices[snr].tilt = msg.payload.angle;
                 }
-                break;
-        }
+            }
+            break;
+        case 'wms-vb-weather-update':
+            if (snr && client.connected) {
+                if (msg.payload.temp !== undefined) client.publish(`warema/${snr}/temperature/state`, msg.payload.temp.toString(), {retain: true});
+                if (msg.payload.lumi !== undefined) client.publish(`warema/${snr}/luminance/state`, msg.payload.lumi.toString(), {retain: true});
+                if (msg.payload.wind !== undefined) client.publish(`warema/${snr}/wind/state`, msg.payload.wind.toString(), {retain: true});
+                if (msg.payload.rain !== undefined) client.publish(`warema/${snr}/rain/state`, msg.payload.rain ? "ON" : "OFF", {retain: true});
+            }
+            break;
     }
 }
 
@@ -202,7 +183,6 @@ client.on('message', (topic, message) => {
         else if (payload === 'ON') stickUsb.vnBlindSetPosition(snr, 100, 0);
         else if (payload === 'OFF') stickUsb.vnBlindSetPosition(snr, 0, 0);
     } else if (cmd === 'set_position') {
-        // Hier wurde der Winkel (tilt) ergänzt, damit die Position sauber fährt
         const currentTilt = devices[snr].tilt || 0;
         stickUsb.vnBlindSetPosition(snr, parseInt(payload), currentTilt);
     } else if (cmd === 'set_tilt') {
