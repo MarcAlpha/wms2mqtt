@@ -97,22 +97,34 @@ function registerDevice(element) {
     
     let modelName = "Unknown WMS Device";
     let discoveryType = "cover"; 
-    let deviceClass = "shutter"; // Standard: Rolladen
+    let deviceClass = "shutter"; 
     let extraConfig = {};
 
     switch (element.type) {
         case "06": modelName = "WMS Weather Station (basic)"; discoveryType = "sensor"; break;
         case "20": 
             modelName = "WMS Plug receiver (Raffstore)"; 
-            deviceClass = "blind"; // Jalousie/Raffstore mit Lamellen
+            deviceClass = "blind";
+            // Tilt-Konfiguration hinzugefügt:
+            extraConfig = { 
+                tilt_status_topic: `warema/${element.snr}/tilt`, 
+                tilt_command_topic: `warema/${element.snr}/set_tilt`,
+                tilt_closed_value: 100, tilt_opened_value: 0
+            };
             break;
         case "21": 
             modelName = "WMS Actuator UP (Raffstore)"; 
-            deviceClass = "blind"; // Jalousie/Raffstore mit Lamellen
+            deviceClass = "blind";
+            // Tilt-Konfiguration hinzugefügt:
+            extraConfig = { 
+                tilt_status_topic: `warema/${element.snr}/tilt`, 
+                tilt_command_topic: `warema/${element.snr}/set_tilt`,
+                tilt_closed_value: 100, tilt_opened_value: 0
+            };
             break;
         case "25": 
             modelName = "WMS Vertical awning"; 
-            deviceClass = "awning"; // Markise
+            deviceClass = "awning"; 
             break;
         case "2A": 
             modelName = "WMS Slat roof"; 
@@ -131,7 +143,7 @@ function registerDevice(element) {
     const base_device = { identifiers: [element.snr], manufacturer: "Warema", name: `Warema ${element.snr}`, model: modelName };
 
     if (discoveryType === "sensor") {
-        // ... (Sensoren-Logik bleibt gleich)
+        // ... (Sensoren-Logik wie gehabt)
     } else {
         const payload = {
             name: `${base_device.name}`,
@@ -140,7 +152,7 @@ function registerDevice(element) {
             command_topic: `warema/${element.snr}/set`,
             availability: [{ topic: bridge_state_topic }, { topic: availability_topic }],
             device: base_device,
-            device_class: deviceClass, // HIER wird der Typ an HA übergeben
+            device_class: deviceClass,
             ...extraConfig
         };
         if (discoveryType === "cover") {
