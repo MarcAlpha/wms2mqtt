@@ -5,6 +5,7 @@ const fs = require('fs');
 
 process.on('SIGINT', () => process.exit(0));
 
+// --- MQTT & HA Setup (Fix für die Abstürze) ---
 let haOptions = {};
 let mqttUrl = 'mqtt://core-mosquitto:1883';
 let mqttUser = null;
@@ -16,7 +17,7 @@ try {
         mqttUser = haOptions.mqtt_user || null;
         mqttPassword = haOptions.mqtt_password || null;
     }
-} catch (e) { log.error("Fehler Optionen: " + e.message); }
+} catch (e) { log.error("Fehler Optionen"); }
 
 if (fs.existsSync('/data/services.json')) {
     try {
@@ -26,7 +27,7 @@ if (fs.existsSync('/data/services.json')) {
             mqttUser = services.mqtt.username;
             mqttPassword = services.mqtt.password;
         }
-    } catch (e) { log.error("Fehler MQTT Services: " + e.message); }
+    } catch (e) { log.error("Fehler Services"); }
 }
 
 const settingsPar = {
@@ -38,6 +39,7 @@ const settingsPar = {
 
 const devices = {};
 
+// --- Discovery ---
 function publishSensorConfig(snr, type, name, unit, deviceClass, icon, baseDevice) {
     const topic = `homeassistant/sensor/${snr}_${type}/config`;
     const payload = {
@@ -53,25 +55,15 @@ function publishSensorConfig(snr, type, name, unit, deviceClass, icon, baseDevic
     client.publish(topic, JSON.stringify(payload), { retain: true });
 }
 
+// --- Registrierung (Original Logik) ---
 function registerDevice(element) {
     const snr = element.snr.toString().toUpperCase();
     if (devices[snr]) return;
 
-    const baseDevice = {
-        identifiers: [snr],
-        manufacturer: "Warema",
-        name: `Warema ${snr}`
-    };
-
+    const baseDevice = { identifiers: [snr], manufacturer: "Warema", name: `Warema ${snr}` };
     let discoveryType = "cover";
-    let hasTilt = false;
 
-    if (["20", "21", "2A"].includes(element.type)) {
-        discoveryType = "cover";
-        hasTilt = true;
-    } else if (["06", "63"].includes(element.type)) {
-        discoveryType = "sensor";
-    }
+    if (["06", "63"].includes(element.type)) discoveryType = "sensor";
 
     if (discoveryType === "cover") {
         const payload = {
@@ -82,19 +74,15 @@ function registerDevice(element) {
             command_topic: `warema/${snr}/set`,
             position_topic: `warema/${snr}/position`,
             set_position_topic: `warema/${snr}/set_position`,
+            tilt_status_topic: `warema/${snr}/tilt`,
+            tilt_command_topic: `warema/${snr}/set_tilt`,
             device_class: "shutter",
             payload_open: "OPEN", payload_close: "CLOSE", payload_stop: "STOP",
             position_open: 0, position_closed: 100,
             availability: [{ topic: 'warema/bridge/state' }, { topic: `warema/${snr}/availability` }]
         };
-        if (hasTilt) {
-            payload.tilt_status_topic = `warema/${snr}/tilt`;
-            payload.tilt_command_topic = `warema/${snr}/set_tilt`;
-        }
         client.publish(`homeassistant/cover/${snr}/config`, JSON.stringify(payload), { retain: true });
         stickUsb.vnBlindAdd(snr, snr);
-        // Sofort Status abfragen nach Registrierung
-        setTimeout(() => stickUsb.vnBlindGetPosition(snr), 2000);
     } else if (discoveryType === "sensor") {
         publishSensorConfig(snr, 'temperature', 'Temperatur', '°C', 'temperature', 'mdi:thermometer', baseDevice);
         publishSensorConfig(snr, 'luminance', 'Helligkeit', 'lx', 'illuminance', 'mdi:brightness-5', baseDevice);
@@ -106,6 +94,7 @@ function registerDevice(element) {
     client.publish(`warema/${snr}/availability`, 'online', { retain: true });
 }
 
+// --- Callback ---
 function callback(err, msg) {
     if (err || !msg) return;
     const snr = (msg.payload && msg.payload.snr) ? msg.payload.snr.toString().toUpperCase() : null;
@@ -119,7 +108,6 @@ function callback(err, msg) {
             break;
         case 'wms-vb-blind-position-update':
             if (snr && client.connected) {
-                log.info(`Position Update für ${snr}: Pos ${msg.payload.position}%`);
                 if (msg.payload.position !== undefined) {
                     client.publish(`warema/${snr}/position`, Math.round(msg.payload.position).toString(), {retain: true});
                 }
@@ -163,9 +151,4 @@ client.on('message', (topic, message) => {
     } else if (cmd === 'set_tilt') {
         stickUsb.vnBlindSetPosition(snr, devices[snr].position || 0, parseInt(payload));
     }
-    
-    // Nach jedem Befehl den Status nach 15 Sekunden abfragen (Zeit für die Fahrt)
-    setTimeout(() => {
-        if (stickUsb && snr) stickUsb.vnBlindGetPosition(snr);
-    }, 15000);
 });
