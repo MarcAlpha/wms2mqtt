@@ -1,0 +1,30 @@
+
+{
+  "name": "Warema Bridge",
+  "version": "dev",
+  "slug": "warema-bridge",
+  "description": "Control your Warema WMS system",
+  "arch": ["aarch64", "amd64", "armv7", "i386"],
+  "startup": "services",
+  "url": "https://github.com/MarcAlpha/wms2mqtt",
+  "boot": "auto",
+  "hassio_api": true,
+  "image": "MarcAlpha/wms2mqtt",
+  "options": {
+    "wms_serial_port": null
+  },
+  "schema": {
+    "wms_key": "str?",
+    "wms_pan_id": "str?",
+    "wms_channel": "int?",
+    "wms_serial_port": "device(subsystem=tty)",
+    "polling_interval": "int?",
+    "moving_interval": "int?", 
+    "ignored_devices": "str?",
+    "force_devices": "str?"
+ 
+  },
+  "services": [
+    "mqtt:need"
+  ]
+}
